@@ -72,7 +72,7 @@ mark_as_advanced(EXIV2_TEAM_EXTRA_WARNINGS EXIV2_TEAM_WARNINGS_AS_ERRORS EXIV2_E
 
 option(BUILD_WITH_STACK_PROTECTOR "Build with stack protector" ON)
 option(BUILD_WITH_CCACHE "Use ccache to speed up compilations" OFF)
-option(BUILD_WITH_COVERAGE "Add compiler flags to generate coverage stats" OFF)
+cmake_dependent_option(BUILD_WITH_COVERAGE "Add compiler flags to generate coverage stats" OFF $<CONFIG:DEBUG> OFF)
 include(cmake/gcovr.cmake REQUIRED)
 
 set(PACKAGE_URL "https://exiv2.org")
