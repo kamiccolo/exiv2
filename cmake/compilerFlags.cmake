@@ -54,9 +54,7 @@ if ( MINGW OR UNIX OR MSYS ) # MINGW, Linux, APPLE, CYGWIN
 
         if(BUILD_WITH_COVERAGE)
             add_compile_options(--coverage)
-            # TODO: From CMake 3.13 we could use add_link_options instead these 2 lines
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
-            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
+            add_link_options(--coverage)
         endif()
 
         add_compile_options(-Wall -Wcast-align -Wpointer-arith -Wformat-security -Wmissing-format-attribute -Woverloaded-virtual -W)
