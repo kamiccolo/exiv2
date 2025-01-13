@@ -6,7 +6,7 @@ project(
   default_options: ['warning_level=0', 'cpp_std=c++17'],
 )
 
-cargs = []
+cargs = ['-D_GNU_SOURCE']
 cpp = meson.get_compiler('cpp')
 if host_machine.system() == 'windows' and get_option('default_library') != 'static'
   cargs += '-DEXIV2API=__declspec(dllexport)'
@@ -44,7 +44,7 @@ cdata.set('EXV_PACKAGE_VERSION', '@0@.@1@'.format(meson.project_version(), cdata
 cdata.set('EXV_PACKAGE_STRING', '@0@ @1@'.format(meson.project_name(), cdata.get('PROJECT_VERSION')))
 
 cdata.set('EXV_HAVE_STRERROR_R', cpp.has_function('strerror_r'))
-cdata.set('EXV_STRERROR_R_CHAR_P', not cpp.compiles('#include <string.h>\nint strerror_r(int,char*,size_t);int main(){}'))
+cdata.set('EXV_STRERROR_R_CHAR_P', not cpp.compiles('#define _GNU_SOURCE\n#include <string.h>\nint strerror_r(int,char*,size_t);int main(){}'))
 
 cdata.set('EXV_ENABLE_BMFF', get_option('bmff'))
 cdata.set('EXV_HAVE_LENSDATA', get_option('lensdata'))
@@ -53,6 +53,10 @@ cdata.set('EXV_ENABLE_VIDEO', get_option('video'))
 deps = []
 deps += cpp.find_library('ws2_32', required: host_machine.system() == 'windows')
 deps += cpp.find_library('procstat', required: host_machine.system() == 'freebsd')
+
+if not cpp.has_header_symbol('format', '__cpp_lib_format')
+  deps += dependency('fmt')
+endif
 
 if cpp.get_argument_syntax() == 'gcc' and cpp.version().version_compare('<9')
   if host_machine.system() == 'linux' and cpp.get_define('_LIBCPP_VERSION', prefix: '#include <new>') == ''
@@ -68,13 +72,12 @@ if brotli_dep.found()
 endif
 
 if get_option('webready')
-  curl_dep = dependency('libcurl', disabler: true, required: get_option('curl'))
+  curl_dep = dependency('libcurl', required: get_option('curl'))
+  web_dep = declare_dependency(dependencies: [curl_dep])
+  deps += web_dep
 else
-  curl_dep = dependency('', disabler: true, required: false)
-endif
-
-if curl_dep.found()
-  deps += curl_dep
+  web_dep = dependency('', disabler: true, required: false)
+  curl_dep = web_dep
 endif
 
 expat_dep = dependency('expat', disabler: true, required: get_option('xmp'))
@@ -118,7 +121,7 @@ cdata.set('EXV_HAVE_XMP_TOOLKIT', expat_dep.found())
 cdata.set('EXV_HAVE_BROTLI', brotli_dep.found())
 cdata.set('EXV_HAVE_ICONV', iconv_dep.found())
 cdata.set('EXV_HAVE_LIBZ', zlib_dep.found())
-cdata.set('EXV_ENABLE_WEBREADY', get_option('webready'))
+cdata.set('EXV_ENABLE_WEBREADY', web_dep.found())
 cdata.set('EXV_USE_CURL', curl_dep.found())
 cdata.set('EXV_ENABLE_NLS', intl_dep.found())
 cdata.set('EXV_ENABLE_FILESYSTEM', true)
@@ -143,8 +146,12 @@ exiv2_sources = files(
   'app/app_utils.cpp',
   'app/exiv2.cpp',
   'app/getopt.cpp',
-  host_machine.system() == 'windows' ? 'app/wmain.cpp' : [],
 )
+
+if host_machine.system() == 'windows'
+  windows = import('windows')
+  exiv2_sources += windows.compile_resources('app/utf8.rc', depend_files: 'app/utf8.manifest') 
+endif
 
 exiv2inc = include_directories('src', 'include/exiv2')
 executable(
@@ -157,7 +164,7 @@ executable(
 
 samples = {
   'addmoddel': [],
-  'conntest': curl_dep,
+  'conntest': web_dep,
   'convert-test': [],
   'easyaccess-test': [],
   'exifcomment': [],

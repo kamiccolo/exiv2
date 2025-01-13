@@ -1702,7 +1702,7 @@ constexpr TagInfo ifdTagInfo[] = {
         "used if ColorPlanes is greater than 3. The matrix is stored in row "
         "scan order."),
      IfdId::ifd0Id, SectionId::dngTags, signedRational, -1, printValue},  // DNG 1.6 tag
-    {0xcd3b, "RGBTables", N_("RGB Tables"),
+    {0xcd3f, "RGBTables", N_("RGB Tables"),
      N_("This tag specifies color transforms that can be applied to masked image "
         "regions. Color transforms are specified using RGB-to-RGB color lookup tables. "
         "These tables are associated with Semantic Masks to limit the color transform "
@@ -1717,7 +1717,7 @@ constexpr TagInfo ifdTagInfo[] = {
      N_("This tag specifies that columns of the image are stored in interleaved "
         "order. The value of the tag specifies the number of interleaved fields. "
         "The use of a non-default value for this tag requires setting the "
-        "DNGBackwardVersion tag to at least 1.7.0.0."),
+        "DNGBackwardVersion tag to at least 1.7.1.0."),
      IfdId::ifd0Id, SectionId::dngTags, unsignedLong, 1, printValue},  // DNG 1.7 tag
     {0xcd44, "ImageSequenceInfo", N_("Image Sequence Info"),
      N_("This is an informative tag that describes how the image file relates "
@@ -1741,6 +1741,19 @@ constexpr TagInfo ifdTagInfo[] = {
         "The purpose of this tag is to associate two or more related camera profiles "
         "into a common group."),
      IfdId::ifd0Id, SectionId::dngTags, asciiString, -1, printValue},  // DNG 1.7 tag
+    {0xcd49, "JXLDistance", N_("JXL Distance"),
+     N_("This optional tag specifies the distance parameter used to encode the JPEG "
+        "XL data in this IFD. A value of 0.0 means lossless compression, while values "
+        "greater than 0.0 means lossy compression."),
+     IfdId::ifd0Id, SectionId::dngTags, tiffFloat, -1, printValue},  // DNG 1.7 tag
+    {0xcd4a, "JXLEffort", N_("JXL Effort"),
+     N_("This optional tag specifies the effort parameter used to encode the JPEG XL "
+        "data in this IFD. Values range from 1 (low) to 9 (high)."),
+     IfdId::ifd0Id, SectionId::dngTags, unsignedLong, -1, printValue},  // DNG 1.7 tag
+    {0xcd4b, "JXLDecodeSpeed", N_("JXL Decode Speed"),
+     N_("This optional tag specifies the decode speed parameter used to encode the "
+        "JPEG XL data in this IFD. Values range from 1 (slow) to 4 (fast)."),
+     IfdId::ifd0Id, SectionId::dngTags, unsignedLong, -1, printValue},  // DNG 1.7 tag
 
     ////////////////////////////////////////
     // End of list marker
@@ -2095,8 +2108,8 @@ constexpr TagInfo exifTagInfo[] = {
         "for the lens that was used in photography. When the minimum F "
         "number is unknown, the notation is 0/0"),
      IfdId::exifId, SectionId::otherTags, unsignedRational, 4, printLensSpecification},
-    {0xa433, "LensMake", N_("Lens Make"), N_("This tag records the lens manufactor as an ASCII string."), IfdId::exifId,
-     SectionId::otherTags, asciiString, 0, printValue},
+    {0xa433, "LensMake", N_("Lens Make"), N_("This tag records the lens manufacturer as an ASCII string."),
+     IfdId::exifId, SectionId::otherTags, asciiString, 0, printValue},
     {0xa434, "LensModel", N_("Lens Model"),
      N_("This tag records the lens's model name and model number as an "
         "ASCII string."),
@@ -2580,7 +2593,7 @@ std::ostream& printBitmask(std::ostream& os, const Value& value, const ExifData*
 }
 
 float fnumber(float apertureValue) {
-  float result = std::exp(std::log(2.0F) * apertureValue / 2.F);
+  float result = std::pow(2.0F, apertureValue / 2.F);
   if (std::abs(result - 3.5) < 0.1) {
     result = 3.5;
   }
@@ -2589,7 +2602,7 @@ float fnumber(float apertureValue) {
 
 URational exposureTime(float shutterSpeedValue) {
   URational ur(1, 1);
-  const double tmp = std::exp(std::log(2.0) * static_cast<double>(shutterSpeedValue));
+  const double tmp = std::pow(2.0, shutterSpeedValue);
   if (tmp > 1) {
     const double x = std::round(tmp);
     // Check that x is within the range of a uint32_t before casting.
@@ -2815,7 +2828,7 @@ std::ostream& print0x0007(std::ostream& os, const Value& value, const ExifData*)
     }
     std::ostringstream oss;
     oss.copyfmt(os);
-    const double t = 3600.0 * value.toInt64(0) + 60.0 * value.toInt64(1) + value.toFloat(2);
+    const double t = (3600.0 * value.toInt64(0)) + (60.0 * value.toInt64(1)) + value.toFloat(2);
     enforce<std::overflow_error>(std::isfinite(t), "Non-finite time value");
     int p = 0;
     const double fraction = std::fmod(t, 1);
@@ -2828,7 +2841,7 @@ std::ostream& print0x0007(std::ostream& os, const Value& value, const ExifData*)
     const auto hh = static_cast<int>(std::fmod(hours, 24));
 
     os << std::setw(2) << std::setfill('0') << std::right << hh << ":" << std::setw(2) << std::setfill('0')
-       << std::right << mm << ":" << std::setw(2 + p * 2) << std::setfill('0') << std::right << std::fixed
+       << std::right << mm << ":" << std::setw(2 + (p * 2)) << std::setfill('0') << std::right << std::fixed
        << std::setprecision(p) << ss;
 
     os.copyfmt(oss);

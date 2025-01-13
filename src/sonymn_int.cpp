@@ -6,6 +6,7 @@
 #include "error.hpp"
 #include "exif.hpp"
 #include "i18n.h"  // NLS support.
+#include "image_int.hpp"
 #include "minoltamn_int.hpp"
 #include "tiffcomposite_int.hpp"
 #include "utils.hpp"
@@ -518,6 +519,8 @@ constexpr TagDetails sonyModelId[] = {
     {395, "ZV-1M2"},
     {396, "ILCE-7CR"},
     {397, "ILCE-7CM2"},
+    {398, "ILX-LR1"},
+    {400, "ILCE-1M2"},
 };
 
 //! Lookup table to translate Sony creative style (main group) values to readable labels
@@ -548,7 +551,7 @@ constexpr StringTagDetails sonyFileFormat[] = {
     {"0 0 0 2", "JPEG"},      {"1 0 0 0", "SR2 1.0"},   {"2 0 0 0", "ARW 1.0"},   {"3 0 0 0", "ARW 2.0"},
     {"3 1 0 0", "ARW 2.1"},   {"3 2 0 0", "ARW 2.2"},   {"3 3 0 0", "ARW 2.3"},   {"3 3 1 0", "ARW 2.3.1"},
     {"3 3 2 0", "ARW 2.3.2"}, {"3 3 3 0", "ARW 2.3.3"}, {"3 3 5 0", "ARW 2.3.5"}, {"4 0 0 0", "ARW 4.0"},
-    {"4 0 1 0", "ARW 4.0.1"}, {"5 0 0 0", "ARW 5.0.0"},
+    {"4 0 1 0", "ARW 4.0.1"}, {"5 0 0 0", "ARW 5.0.0"}, {"5 0 1 0", "ARW 5.0.1"},
 };
 
 //! Lookup table to translate Sony dynamic range optimizer values to readable labels
@@ -844,7 +847,7 @@ static auto getMetaVersion(const ExifData* metadata, std::string& val) {
 
   if (pos != metadata->end() && pos->typeId() == asciiString) {
     std::string temp = pos->toString();
-    if (temp.length() != 0) {
+    if (!temp.empty()) {
       val = temp;
       return true;
     }
@@ -1237,10 +1240,8 @@ std::ostream& SonyMakerNote::printPixelShiftInfo(std::ostream& os, const Value& 
 
   std::ios::fmtflags f(os.flags());
 
-  os << "Group " << std::setw(2) << std::setfill('0') << ((groupID >> 17) & 0x1f) << std::setw(2) << std::setfill('0')
-     << ((groupID >> 12) & 0x1f) << std::setw(2) << std::setfill('0') << ((groupID >> 6) & 0x3f) << std::setw(2)
-     << std::setfill('0') << (groupID & 0x3f);
-
+  os << stringFormat("Group {:02}{:02}{:02}{:02}", (groupID >> 17) & 0x1f, (groupID >> 12) & 0x1f,
+                     (groupID >> 6) & 0x3f, groupID & 0x3f);
   os << ", Shot " << value.toUint32(4) << "/" << value.toUint32(5) << " (0x" << std::hex << (groupID >> 22) << ")";
   os.flags(f);
   return os;
@@ -1332,8 +1333,7 @@ static void findLensSpecFlags(const Value& value, std::string& flagsStart, std::
       }
       // Should never get in here. LensSpecFlags.mask should contain all the
       // bits in all the LensSpecFlags.flags.val_ entries
-      throw Error(ErrorCode::kerErrorMessage,
-                  std::string("LensSpecFlags mask doesn't match the bits in the flags array"));
+      throw Error(ErrorCode::kerErrorMessage, "LensSpecFlags mask doesn't match the bits in the flags array");
     }
   }
 }
@@ -1858,7 +1858,7 @@ constexpr TagInfo SonyMakerNote::tagInfoCs_[] = {
     {0x002B, "LongExposureNoiseReduction", N_("Long Exposure Noise Reduction"), N_("Long Exposure Noise Reduction"),
      IfdId::sony1CsId, SectionId::makerTags, unsignedShort, 1, printMinoltaSonyBoolValue},
     // NOTE: A700 only
-    {0x002C, "HighISONoiseReduction", N_("High ISO NoiseReduction"), N_("High ISO NoiseReduction"), IfdId::sony1CsId,
+    {0x002C, "HighISONoiseReduction", N_("High ISO Noise Reduction"), N_("High ISO Noise Reduction"), IfdId::sony1CsId,
      SectionId::makerTags, unsignedShort, 1, printValue},
     // NOTE: A700 only
     {0x002D, "ImageStyle", N_("Image Style"), N_("Image Style"), IfdId::sony1CsId, SectionId::makerTags, unsignedShort,
