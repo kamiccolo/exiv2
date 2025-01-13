@@ -92,6 +92,11 @@ endif()
 
 include_directories(${CMAKE_BINARY_DIR}) # Make the exv_conf.h file visible for the full project
 
+check_cxx_symbol_exists(__cpp_lib_format "format" HAVE_STD_FORMAT)
+if(NOT HAVE_STD_FORMAT)
+  find_package(fmt REQUIRED)
+endif()
+
 if(EXIV2_ENABLE_XMP)
   add_subdirectory(xmpsdk)
 endif()
@@ -138,6 +143,14 @@ if(EXIV2_BUILD_EXIV2_COMMAND)
       NAME lensTests
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
       COMMAND cmake -E env EXIV2_BINDIR=${CMAKE_RUNTIME_OUTPUT_DIRECTORY} ${Python3_EXECUTABLE} runner.py --verbose lens_tests
+    )
+    # Repeat lens test with a DE locale that uses "," as float delimiter
+    # to check that all float conversions are done independently of locale
+    # See GitHub issue #2746
+    add_test(
+      NAME lensTestsLocaleDE
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+      COMMAND cmake -E env LC_ALL=de_DE.UTF-8 EXIV2_BINDIR=${CMAKE_RUNTIME_OUTPUT_DIRECTORY} ${Python3_EXECUTABLE} runner.py --verbose lens_tests
     )
     add_test(
       NAME tiffTests

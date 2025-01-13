@@ -113,10 +113,13 @@ def get_valid_files(data_dir):
         "issue_2339_poc.tiff",
         "issue_2352_poc.jpg",
         "issue_2385_poc.tiff",
+        "issue_ghsa_crmj_qh74_2r36_poc.mov",
+        "issue_ghsa_g9xm_7538_mq8w_poc.mov",
         "issue_ghsa_583f_w9pm_99r2_poc.jp2",
         "issue_ghsa_7569_phvm_vwc2_poc.jp2",
         "issue_ghsa_mxw9_qx4c_6m8v_poc.jp2",
         "issue_ghsa_hrw9_ggg3_3r4r_poc.jpg",
+        "issue_ghsa_g9xm_7538_mq8w_poc.mov",
         "pocIssue283.jpg",
         "poc_1522.jp2",
         "xmpsdk.xmp",
@@ -189,7 +192,7 @@ def make_test_function(filename):
 
     def test_func(self):
         out = BT.Output()
-        out += BT.Executer("exiv2 -Pkycvt " + filename)
+        out += BT.Executer(f"exiv2 -Pkycvt {filename}")
         BT.reportTest(os.path.basename(filename), out)
 
     return test_func
@@ -199,4 +202,4 @@ def make_test_function(filename):
 # assign it as a member function to our TestCase
 for f in all_files:
     testname = os.path.basename(f)
-    setattr(TestAllFiles, testname + "_test", make_test_function(f))
+    setattr(TestAllFiles, f"{testname}_test", make_test_function(f))

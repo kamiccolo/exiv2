@@ -102,7 +102,7 @@ constexpr TagDetails casioCCDSensitivity[] = {
 
 // Casio MakerNote Tag Info
 constexpr TagInfo CasioMakerNote::tagInfo_[] = {
-    {0x0001, "RecodingMode", N_("RecodingMode"), N_("Recording Mode"), IfdId::casioId, SectionId::makerTags,
+    {0x0001, "RecordingMode", N_("Recording Mode"), N_("Recording Mode"), IfdId::casioId, SectionId::makerTags,
      unsignedShort, -1, EXV_PRINT_TAG(casioRecordingMode)},
     {0x0002, "Quality", N_("Quality"), N_("Quality"), IfdId::casioId, SectionId::makerTags, unsignedShort, -1,
      EXV_PRINT_TAG(casioQuality)},
@@ -169,7 +169,7 @@ std::ostream& CasioMakerNote::print0x0015(std::ostream& os, const Value& value, 
 
   if (numbers.size() >= 10) {
     // year
-    long l = (numbers[0] - 48) * 10 + (numbers[1] - 48);
+    long l = ((numbers[0] - 48) * 10) + (numbers[1] - 48);
     if (l < 70)
       l += 2000;
     else
@@ -470,7 +470,7 @@ std::ostream& Casio2MakerNote::print0x2001(std::ostream& os, const Value& value,
 
   if (numbers.size() >= 10) {
     // year
-    long l = (numbers[0] - 48) * 10 + (numbers[1] - 48);
+    long l = ((numbers[0] - 48) * 10) + (numbers[1] - 48);
     if (l < 70)
       l += 2000;
     else

@@ -11,6 +11,7 @@
 #include "image_int.hpp"
 #include "types.hpp"
 
+#include <algorithm>
 #include <cstdio>   // for remove, rename
 #include <cstdlib>  // for alloc, realloc, free
 #include <cstring>  // std::memcpy
@@ -655,8 +656,7 @@ void MemIo::Impl::reserve(size_t wcount) {
   if (need > size_) {
     if (need > sizeAlloced_) {
       blockSize = 2 * sizeAlloced_;
-      if (blockSize > maxBlockSize)
-        blockSize = maxBlockSize;
+      blockSize = std::min(blockSize, maxBlockSize);
       // Allocate in blocks
       size_t want = blockSize * (1 + need / blockSize);
       data_ = static_cast<byte*>(std::realloc(data_, want));
@@ -930,9 +930,7 @@ std::string XPathIo::writeDataToFile(const std::string& orgPath) {
 
   // generating the name for temp file.
   std::time_t timestamp = std::time(nullptr);
-  std::stringstream ss;
-  ss << timestamp << XPathIo::TEMP_FILE_EXT;
-  std::string path = ss.str();
+  auto path = stringFormat("{}{}", timestamp, XPathIo::TEMP_FILE_EXT);
 
   if (prot == pStdin) {
     if (isatty(fileno(stdin)))
@@ -942,7 +940,7 @@ std::string XPathIo::writeDataToFile(const std::string& orgPath) {
     if (_setmode(_fileno(stdin), _O_BINARY) == -1)
       throw Error(ErrorCode::kerInputDataReadFailed);
 #endif
-    std::ofstream fs(path.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+    std::ofstream fs(path, std::ios::out | std::ios::binary | std::ios::trunc);
     // read stdin and write to the temp file.
     char readBuf[100 * 1024];
     std::streamsize readBufSize = 0;
@@ -955,7 +953,7 @@ std::string XPathIo::writeDataToFile(const std::string& orgPath) {
     } while (readBufSize);
     fs.close();
   } else if (prot == pDataUri) {
-    std::ofstream fs(path.c_str(), std::ios::out | std::ios::binary | std::ios::trunc);
+    std::ofstream fs(path, std::ios::out | std::ios::binary | std::ios::trunc);
     // read data uri and write to the temp file.
     size_t base64Pos = orgPath.find("base64,");
     if (base64Pos == std::string::npos) {
@@ -1129,7 +1127,7 @@ int RemoteIo::close() {
     p_->idx_ = 0;
   }
 #ifdef EXIV2_DEBUG_MESSAGES
-  std::cerr << "RemoteIo::close totalRead_ = " << p_->totalRead_ << std::endl;
+  std::cerr << "RemoteIo::close totalRead_ = " << p_->totalRead_ << '\n';
 #endif
   if (bigBlock_) {
     delete[] bigBlock_;
@@ -1241,7 +1239,7 @@ size_t RemoteIo::read(byte* buf, size_t rcount) {
   }
 
   size_t iBlock = lowBlock;
-  size_t startPos = p_->idx_ - lowBlock * p_->blockSize_;
+  size_t startPos = p_->idx_ - (lowBlock * p_->blockSize_);
   size_t totalRead = 0;
   do {
     auto data = p_->blocksMap_[iBlock++].getData();
@@ -1273,7 +1271,7 @@ int RemoteIo::getb() {
   p_->populateBlocks(expectedBlock, expectedBlock);
 
   auto data = p_->blocksMap_[expectedBlock].getData();
-  return data[p_->idx_++ - expectedBlock * p_->blockSize_];
+  return data[p_->idx_++ - (expectedBlock * p_->blockSize_)];
 }
 
 void RemoteIo::transfer(BasicIo& src) {
@@ -1303,8 +1301,7 @@ int RemoteIo::seek(int64_t offset, Position pos) {
   // if (newIdx < 0 || newIdx > (long) p_->size_) return 1;
   p_->idx_ = static_cast<size_t>(newIdx);
   p_->eof_ = newIdx > static_cast<int64_t>(p_->size_);
-  if (p_->idx_ > p_->size_)
-    p_->idx_ = p_->size_;
+  p_->idx_ = std::min(p_->idx_, p_->size_);
   return 0;
 }
 
@@ -1322,7 +1319,7 @@ byte* RemoteIo::mmap(bool /*isWriteable*/) {
       }
     }
 #ifdef EXIV2_DEBUG_MESSAGES
-    std::cerr << "RemoteIo::mmap nRealData = " << nRealData << std::endl;
+    std::cerr << "RemoteIo::mmap nRealData = " << nRealData << '\n';
 #endif
   }
 
@@ -1425,7 +1422,7 @@ int64_t HttpIo::HttpImpl::getFileLength() {
   }
 
   auto lengthIter = response.find("Content-Length");
-  return (lengthIter == response.end()) ? -1 : atol((lengthIter->second).c_str());
+  return (lengthIter == response.end()) ? -1 : std::stoll(lengthIter->second);
 }
 
 void HttpIo::HttpImpl::getDataByRange(size_t lowBlock, size_t highBlock, std::string& response) {
@@ -1438,9 +1435,7 @@ void HttpIo::HttpImpl::getDataByRange(size_t lowBlock, size_t highBlock, std::st
   request["verb"] = "GET";
   std::string errors;
   if (lowBlock != std::numeric_limits<size_t>::max() && highBlock != std::numeric_limits<size_t>::max()) {
-    std::stringstream ss;
-    ss << "Range: bytes=" << lowBlock * blockSize_ << "-" << ((highBlock + 1) * blockSize_ - 1) << "\r\n";
-    request["header"] = ss.str();
+    request["header"] = stringFormat("Range: bytes={}-{}", lowBlock * blockSize_, (highBlock + 1) * (blockSize_ - 1));
   }
 
   int serverCode = http(request, responseDic, errors);
@@ -1475,26 +1470,21 @@ void HttpIo::HttpImpl::writeRemote(const byte* data, size_t size, size_t from, s
   request["verb"] = "POST";
 
   // encode base64
-  size_t encodeLength = ((size + 2) / 3) * 4 + 1;
+  size_t encodeLength = (((size + 2) / 3) * 4) + 1;
   std::vector<char> encodeData(encodeLength);
   base64encode(data, size, encodeData.data(), encodeLength);
   // url encode
   const std::string urlencodeData = urlencode(encodeData.data());
 
-  std::stringstream ss;
-  ss << "path=" << hostInfo_.Path << "&"
-     << "from=" << from << "&"
-     << "to=" << to << "&"
-     << "data=" << urlencodeData;
-  std::string postData = ss.str();
+  auto postData = stringFormat("path={}&from={}&to={}&data={}", hostInfo_.Path, from, to, urlencodeData);
 
   // create the header
-  ss.str("");
-  ss << "Content-Length: " << postData.length() << "\n"
-     << "Content-Type: application/x-www-form-urlencoded\n"
-     << "\n"
-     << postData << "\r\n";
-  request["header"] = ss.str();
+  auto header = stringFormat(
+      "Content-Length: {}\n"
+      "Content-Type: application/x-www-form-urlencoded\n"
+      "\n{}\r\n",
+      postData.length(), postData);
+  request["header"] = header;
 
   int serverCode = http(request, response, errors);
   if (serverCode < 0 || serverCode >= 400 || !errors.empty()) {
@@ -1570,7 +1560,7 @@ CurlIo::CurlImpl::CurlImpl(const std::string& url, size_t blockSize) : Impl(url,
   }
 
   std::string timeout = getEnv(envTIMEOUT);
-  timeout_ = atol(timeout.c_str());
+  timeout_ = std::stol(timeout);
   if (timeout_ == 0) {
     throw Error(ErrorCode::kerErrorMessage, "Timeout Environmental Variable must be a positive integer.");
   }
@@ -1617,9 +1607,7 @@ void CurlIo::CurlImpl::getDataByRange(size_t lowBlock, size_t highBlock, std::st
   // curl_easy_setopt(curl_, CURLOPT_VERBOSE, 1); // debugging mode
 
   if (lowBlock != std::numeric_limits<size_t>::max() && highBlock != std::numeric_limits<size_t>::max()) {
-    std::stringstream ss;
-    ss << lowBlock * blockSize_ << "-" << ((highBlock + 1) * blockSize_ - 1);
-    std::string range = ss.str();
+    auto range = stringFormat("{}-{}", lowBlock * blockSize_, (highBlock + 1) * (blockSize_ - 1));
     curl_easy_setopt(curl_, CURLOPT_RANGE, range.c_str());
   }
 
@@ -1658,17 +1646,12 @@ void CurlIo::CurlImpl::writeRemote(const byte* data, size_t size, size_t from, s
   curl_easy_setopt(curl_, CURLOPT_SSL_VERIFYPEER, 0L);
 
   // encode base64
-  size_t encodeLength = ((size + 2) / 3) * 4 + 1;
+  size_t encodeLength = (((size + 2) / 3) * 4) + 1;
   std::vector<char> encodeData(encodeLength);
   base64encode(data, size, encodeData.data(), encodeLength);
   // url encode
   const std::string urlencodeData = urlencode(encodeData.data());
-  std::stringstream ss;
-  ss << "path=" << hostInfo.Path << "&"
-     << "from=" << from << "&"
-     << "to=" << to << "&"
-     << "data=" << urlencodeData;
-  std::string postData = ss.str();
+  auto postData = stringFormat("path={}&from={}&to={}&data={}", hostInfo.Path, from, to, urlencodeData);
 
   curl_easy_setopt(curl_, CURLOPT_POSTFIELDS, postData.c_str());
   // Perform the request, res will get the return code.

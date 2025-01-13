@@ -8,8 +8,9 @@
 #include "error.hpp"
 #include "types.hpp"
 
+#include "image_int.hpp"
+
 // + standard includes
-#include <regex>
 #include <sstream>
 
 // *****************************************************************************
@@ -593,10 +594,9 @@ size_t XmpArrayValue::count() const {
 }
 
 std::ostream& XmpArrayValue::write(std::ostream& os) const {
-  for (auto i = value_.begin(); i != value_.end(); ++i) {
-    if (i != value_.begin())
-      os << ", ";
-    os << *i;
+  if (!value_.empty()) {
+    std::copy(value_.begin(), value_.end() - 1, std::ostream_iterator<std::string>(os, ", "));
+    os << value_.back();
   }
   return os;
 }
@@ -758,9 +758,8 @@ int DateValue::read(const byte* buf, size_t len, ByteOrder /*byteOrder*/) {
 int DateValue::read(const std::string& buf) {
   // ISO 8601 date formats:
   // https://web.archive.org/web/20171020084445/https://www.loc.gov/standards/datetime/ISO_DIS%208601-1.pdf
-  static const std::regex reExtended(R"(^(\d{4})-(\d{2})-(\d{2}))");
-  static const std::regex reBasic(R"(^(\d{4})(\d{2})(\d{2}))");
-  std::smatch sm;
+  size_t monthPos = 0;
+  size_t dayPos = 0;
 
   auto printWarning = [] {
 #ifndef SUPPRESS_WARNINGS
@@ -768,18 +767,38 @@ int DateValue::read(const std::string& buf) {
 #endif
   };
 
-  // Note: We use here regex_search instead of regex_match, because the string can be longer than expected and
-  // also contain the time
-  if (std::regex_search(buf, sm, reExtended) || std::regex_search(buf, sm, reBasic)) {
-    date_.year = std::stoi(sm[1].str());
-    date_.month = std::stoi(sm[2].str());
-    if (date_.month > 12) {
-      date_.month = 0;
+  if (buf.size() < 8) {
+    printWarning();
+    return 1;
+  }
+
+  if ((buf.size() >= 10 && buf[4] == '-' && buf[7] == '-') || (buf.size() == 8)) {
+    if (buf.size() >= 10) {
+      monthPos = 5;
+      dayPos = 8;
+    } else {
+      monthPos = 4;
+      dayPos = 6;
+    }
+
+    auto checkDigits = [&buf, &printWarning](size_t start, size_t count, int32_t& dest) {
+      for (size_t i = start; i < start + count; ++i) {
+        if (!std::isdigit(buf[i])) {
+          printWarning();
+          return 1;
+        }
+      }
+      dest = std::stoul(buf.substr(start, count));
+      return 0;
+    };
+
+    if (checkDigits(0, 4, date_.year) || checkDigits(monthPos, 2, date_.month) || checkDigits(dayPos, 2, date_.day)) {
       printWarning();
       return 1;
     }
-    date_.day = std::stoi(sm[3].str());
-    if (date_.day > 31) {
+
+    if (date_.month > 12 || date_.day > 31) {
+      date_.month = 0;
       date_.day = 0;
       printWarning();
       return 1;
@@ -824,8 +843,7 @@ DateValue* DateValue::clone_() const {
 std::ostream& DateValue::write(std::ostream& os) const {
   // Write DateValue in ISO 8601 Extended format: YYYY-MM-DD
   std::ios::fmtflags f(os.flags());
-  os << std::setw(4) << std::setfill('0') << date_.year << '-' << std::right << std::setw(2) << std::setfill('0')
-     << date_.month << '-' << std::setw(2) << std::setfill('0') << date_.day;
+  os << stringFormat("{:04}-{:02}-{:02}", date_.year, date_.month, date_.day);
   os.flags(f);
   return os;
 }
@@ -845,6 +863,7 @@ int64_t DateValue::toInt64(size_t /*n*/) const {
 uint32_t DateValue::toUint32(size_t /*n*/) const {
   const int64_t t = toInt64();
   if (t < 0 || t > std::numeric_limits<uint32_t>::max()) {
+    ok_ = false;
     return 0;
   }
   return static_cast<uint32_t>(t);
@@ -855,7 +874,12 @@ float DateValue::toFloat(size_t n) const {
 }
 
 Rational DateValue::toRational(size_t n) const {
-  return {static_cast<int32_t>(toInt64(n)), 1};
+  const int64_t t = toInt64(n);
+  if (t < std::numeric_limits<int32_t>::min() || t > std::numeric_limits<int32_t>::max()) {
+    ok_ = false;
+    return {0, 1};
+  }
+  return {static_cast<int32_t>(t), 1};
 }
 
 TimeValue::TimeValue() : Value(time) {
@@ -876,39 +900,83 @@ int TimeValue::read(const std::string& buf) {
   // https://web.archive.org/web/20171020084445/https://www.loc.gov/standards/datetime/ISO_DIS%208601-1.pdf
   // Not supported formats:
   // 4.2.2.4 Representations with decimal fraction: 232050,5
-  static const std::regex re(R"(^(2[0-3]|[01][0-9]):?([0-5][0-9])?:?([0-5][0-9])?$)");
-  static const std::regex reExt(
-      R"(^(2[0-3]|[01][0-9]):?([0-5][0-9]):?([0-5][0-9])(Z|[+-](?:2[0-3]|[01][0-9])(?::?(?:[0-5][0-9]))?)$)");
+  auto printWarning = [] {
+#ifndef SUPPRESS_WARNINGS
+    EXV_WARNING << Error(ErrorCode::kerUnsupportedTimeFormat) << "\n";
+#endif
+    return 1;
+  };
 
-  if (std::smatch sm; std::regex_match(buf, sm, re) || std::regex_match(buf, sm, reExt)) {
-    time_.hour = sm.length(1) ? std::stoi(sm[1].str()) : 0;
-    time_.minute = sm.length(2) ? std::stoi(sm[2].str()) : 0;
-    time_.second = sm.length(3) ? std::stoi(sm[3].str()) : 0;
-    if (sm.size() > 4) {
-      std::string str = sm[4].str();
-      const auto strSize = str.size();
-      auto posColon = str.find(':');
+  if (buf.size() < 2)
+    return printWarning();
 
-      if (posColon == std::string::npos) {
-        // Extended format
-        time_.tzHour = std::stoi(str.substr(0, 3));
-        if (strSize > 3) {
-          int minute = std::stoi(str.substr(3));
-          time_.tzMinute = time_.tzHour < 0 ? -minute : minute;
-        }
-      } else {
-        // Basic format
-        time_.tzHour = std::stoi(str.substr(0, posColon));
-        int minute = std::stoi(str.substr(posColon + 1));
+  for (auto c : buf)
+    if (c != ':' && c != '+' && c != '-' && c != 'Z' && !std::isdigit(c))
+      return printWarning();
+
+  size_t mpos;
+  size_t spos;
+  if (buf.find(':') != std::string::npos) {
+    mpos = 3;
+    spos = 6;
+  } else {
+    mpos = 2;
+    spos = 4;
+  }
+
+  auto hi = std::stoi(buf.substr(0, 2));
+  if (hi > 23)
+    return printWarning();
+  time_.hour = hi;
+  if (buf.size() > 3) {
+    auto mi = std::stoi(buf.substr(mpos, 2));
+    if (mi > 59)
+      return printWarning();
+    time_.minute = std::stoi(buf.substr(mpos, 2));
+  } else {
+    time_.minute = 0;
+  }
+  if (buf.size() > 5) {
+    auto si = std::stoi(buf.substr(spos, 2));
+    if (si > 60)
+      return printWarning();
+    time_.second = std::stoi(buf.substr(spos, 2));
+  } else {
+    time_.second = 0;
+  }
+
+  auto fpos = buf.find('+');
+  if (fpos == std::string::npos)
+    fpos = buf.find('-');
+
+  if (fpos != std::string::npos) {
+    auto format = buf.substr(fpos, buf.size());
+    auto posColon = format.find(':');
+    if (posColon == std::string::npos) {
+      // Extended format
+      auto tzhi = std::stoi(format.substr(0, 3));
+      if (tzhi > 23)
+        return printWarning();
+      time_.tzHour = tzhi;
+      if (format.size() > 3) {
+        int minute = std::stoi(format.substr(3));
+        if (minute > 59)
+          return printWarning();
         time_.tzMinute = time_.tzHour < 0 ? -minute : minute;
       }
+    } else {
+      // Basic format
+      auto tzhi = std::stoi(format.substr(0, posColon));
+      if (tzhi > 23)
+        return printWarning();
+      time_.tzHour = tzhi;
+      int minute = std::stoi(format.substr(posColon + 1));
+      if (minute > 59)
+        return printWarning();
+      time_.tzMinute = time_.tzHour < 0 ? -minute : minute;
     }
-    return 0;
   }
-#ifndef SUPPRESS_WARNINGS
-  EXV_WARNING << Error(ErrorCode::kerUnsupportedTimeFormat) << "\n";
-#endif
-  return 1;
+  return 0;
 }
 
 /// \todo not used internally. At least we should test it
@@ -956,9 +1024,8 @@ std::ostream& TimeValue::write(std::ostream& os) const {
     plusMinus = '-';
 
   std::ios::fmtflags f(os.flags());
-  os << std::right << std::setw(2) << std::setfill('0') << time_.hour << ':' << std::setw(2) << std::setfill('0')
-     << time_.minute << ':' << std::setw(2) << std::setfill('0') << time_.second << plusMinus << std::setw(2)
-     << std::setfill('0') << abs(time_.tzHour) << ':' << std::setw(2) << std::setfill('0') << abs(time_.tzMinute);
+  os << stringFormat("{:02}:{:02}:{:02}{}{:02}:{:02}", time_.hour, time_.minute, time_.second, plusMinus,
+                     std::abs(time_.tzHour), std::abs(time_.tzMinute));
   os.flags(f);
 
   return os;
@@ -977,11 +1044,7 @@ int64_t TimeValue::toInt64(size_t /*n*/) const {
 }
 
 uint32_t TimeValue::toUint32(size_t /*n*/) const {
-  const int64_t t = toInt64();
-  if (t < 0 || t > std::numeric_limits<uint32_t>::max()) {
-    return 0;
-  }
-  return static_cast<uint32_t>(t);
+  return std::clamp<int64_t>(toInt64(), 0, std::numeric_limits<uint32_t>::max());
 }
 
 float TimeValue::toFloat(size_t n) const {
