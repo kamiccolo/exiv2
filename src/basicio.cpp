@@ -69,12 +69,18 @@ class FileIo::Impl {
  public:
   //! Constructor
   explicit Impl(std::string path);
+#ifdef _WIN32
+  explicit Impl(std::wstring path);
+#endif
   ~Impl() = default;
   // Enumerations
   //! Mode of operation
   enum OpMode { opRead, opWrite, opSeek };
   // DATA
   std::string path_;       //!< (Standard) path
+#ifdef _WIN32
+  std::wstring wpath_;     //!< UCS2 path
+#endif
   std::string openMode_;   //!< File open mode
   FILE* fp_{};             //!< File stream pointer
   OpMode opMode_{opSeek};  //!< File open mode
@@ -110,7 +116,19 @@ class FileIo::Impl {
 };
 
 FileIo::Impl::Impl(std::string path) : path_(std::move(path)) {
+#ifdef _WIN32
+  wchar_t t[512];
+  const auto nw = MultiByteToWideChar(CP_UTF8, 0, path_.data(), static_cast<int>(path_.size()), t, 512);
+  wpath_.assign(t, nw);
+#endif
 }
+#ifdef _WIN32
+FileIo::Impl::Impl(std::wstring path) : wpath_(std::move(path)) {
+  char t[1024];
+  const auto nc = WideCharToMultiByte(CP_UTF8, 0, wpath_.data(), static_cast<int>(wpath_.size()), t, 1024, nullptr, nullptr);
+  path_.assign(t, nc);
+}
+#endif
 
 int FileIo::Impl::switchMode(OpMode opMode) {
   if (opMode_ == opMode)
@@ -159,7 +177,11 @@ int FileIo::Impl::switchMode(OpMode opMode) {
   std::fclose(fp_);
   openMode_ = "r+b";
   opMode_ = opSeek;
+#ifdef _WIN32
+  fp_ = _wfopen(wpath_.c_str(), L"r+b");
+#else
   fp_ = std::fopen(path_.c_str(), openMode_.c_str());
+#endif
   if (!fp_)
     return 1;
 #ifdef _WIN32
@@ -170,6 +192,15 @@ int FileIo::Impl::switchMode(OpMode opMode) {
 }  // FileIo::Impl::switchMode
 
 int FileIo::Impl::stat(StructStat& buf) const {
+#ifdef _WIN32
+  struct _stat64 st;
+  auto ret = _wstat64(wpath_.c_str(), &st);
+  if (ret == 0) {
+    buf.st_size = st.st_size;
+    buf.st_mode = st.st_mode;
+  }
+  return ret;
+#else
   try {
     buf.st_size = fs::file_size(path_);
     buf.st_mode = fs::status(path_).permissions();
@@ -177,10 +208,15 @@ int FileIo::Impl::stat(StructStat& buf) const {
   } catch (const fs::filesystem_error&) {
     return -1;
   }
+#endif
 }  // FileIo::Impl::stat
 
 FileIo::FileIo(const std::string& path) : p_(std::make_unique<Impl>(path)) {
 }
+#ifdef _WIN32
+FileIo::FileIo(const std::wstring& path) : p_(std::make_unique<Impl>(path)) {
+}
+#endif
 
 FileIo::~FileIo() {
   close();
@@ -296,7 +332,22 @@ byte* FileIo::mmap(bool isWriteable) {
 void FileIo::setPath(const std::string& path) {
   close();
   p_->path_ = path;
+#ifdef _WIN32
+  wchar_t t[512];
+  const auto nw = MultiByteToWideChar(CP_UTF8, 0, p_->path_.data(), static_cast<int>(p_->path_.size()), t, 512);
+  p_->wpath_.assign(t, nw);
+#endif
 }
+
+#ifdef _WIN32
+void FileIo::setPath(const std::wstring& path) {
+  close();
+  p_->wpath_ = path;
+  char t[1024];
+  const auto nc = WideCharToMultiByte(CP_UTF8, 0, p_->wpath_.data(), static_cast<int>(p_->wpath_.size()), t, 1024, nullptr, nullptr);
+  p_->path_.assign(t, nc);
+}
+#endif
 
 size_t FileIo::write(const byte* data, size_t wcount) {
   if (p_->switchMode(Impl::opWrite) != 0)
@@ -480,7 +531,13 @@ int FileIo::open(const std::string& mode) {
   close();
   p_->openMode_ = mode;
   p_->opMode_ = Impl::opSeek;
+#ifdef _WIN32
+  wchar_t wmode[10];
+  MultiByteToWideChar(CP_UTF8, 0, mode.c_str(), -1, wmode, 10);
+  p_->fp_ = _wfopen(p_->wpath_.c_str(), wmode);
+#else
   p_->fp_ = ::fopen(path().c_str(), mode.c_str());
+#endif
   if (!p_->fp_)
     return 1;
   return 0;
@@ -843,53 +900,7 @@ const std::string& MemIo::path() const noexcept {
 void MemIo::populateFakeData() {
 }
 
-#if EXV_XPATH_MEMIO
-XPathIo::XPathIo(const std::string& path) {
-  Protocol prot = fileProtocol(path);
-
-  if (prot == pStdin)
-    ReadStdin();
-  else if (prot == pDataUri)
-    ReadDataUri(path);
-}
-
-void XPathIo::ReadStdin() {
-  if (isatty(fileno(stdin)))
-    throw Error(ErrorCode::kerInputDataReadFailed);
-
-#ifdef _O_BINARY
-  // convert stdin to binary
-  if (_setmode(_fileno(stdin), _O_BINARY) == -1)
-    throw Error(ErrorCode::kerInputDataReadFailed);
-#endif
-
-  char readBuf[100 * 1024];
-  std::streamsize readBufSize = 0;
-  do {
-    std::cin.read(readBuf, sizeof(readBuf));
-    readBufSize = std::cin.gcount();
-    if (readBufSize > 0) {
-      write((byte*)readBuf, (long)readBufSize);
-    }
-  } while (readBufSize);
-}
-
-void XPathIo::ReadDataUri(const std::string& path) {
-  size_t base64Pos = path.find("base64,");
-  if (base64Pos == std::string::npos)
-    throw Error(ErrorCode::kerErrorMessage, "No base64 data");
-
-  std::string data = path.substr(base64Pos + 7);
-  auto decodeData = new char[data.length()];
-  auto size = base64decode(data.c_str(), decodeData, data.length());
-  if (size > 0)
-    write((byte*)decodeData, size);
-  else
-    throw Error(ErrorCode::kerErrorMessage, "Unable to decode base 64.");
-  delete[] decodeData;
-}
-
-#elif defined(EXV_ENABLE_FILESYSTEM)
+#if defined(EXV_ENABLE_FILESYSTEM)
 XPathIo::XPathIo(const std::string& orgPath) : FileIo(XPathIo::writeDataToFile(orgPath)), tempFilePath_(path()) {
 }
 
